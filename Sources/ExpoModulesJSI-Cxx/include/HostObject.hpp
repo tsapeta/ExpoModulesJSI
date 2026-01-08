@@ -4,7 +4,8 @@
 
 #import <string>
 #import <vector>
-#import <jsi.h>
+#import "jsi.h"
+#import "CxxClosure.hpp"
 
 namespace jsi = facebook::jsi;
 
@@ -12,10 +13,10 @@ namespace expo {
 
 class JSI_EXPORT HostObject : public jsi::HostObject {
 public:
-  using GetFunction = jsi::Value(^)(std::string name);
-  using SetFunction = void(^)(std::string name, const jsi::Value &value);
-  using GetPropertyNamesFunction = std::vector<std::string>(^)();
-  using DeallocFunction = void(^)();
+  using GetFunction = CxxClosure<jsi::Value, std::string>;
+  using SetFunction = CxxClosure<void, std::string, const jsi::Value &>;
+  using GetPropertyNamesFunction = CxxClosure<std::vector<std::string>>;
+  using DeallocFunction = CxxClosure<void>;
 
   HostObject(GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc);
 
@@ -30,10 +31,10 @@ public:
   static jsi::Object makeObject(jsi::Runtime &runtime, GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc);
 
 private:
-  const GetFunction _get;
-  const SetFunction _set;
-  const GetPropertyNamesFunction _getPropertyNames;
-  const DeallocFunction _dealloc;
+  GetFunction _get;
+  SetFunction _set;
+  GetPropertyNamesFunction _getPropertyNames;
+  DeallocFunction _dealloc;
 }; // class HostObject
 
 } // namespace expo

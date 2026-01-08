@@ -1,13 +1,13 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
-import jsi
-import ExpoModulesJSI_Cxx
+internal import jsi
+internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptFunction: ~Copyable, JSRepresentable {
+public struct JavaScriptFunction: ~Copyable {
   internal weak var runtime: JavaScriptRuntime?
   internal let pointee: facebook.jsi.Function
 
-  public init(_ runtime: JavaScriptRuntime?, _ pointee: consuming facebook.jsi.Function) {
+  internal/*!*/ init(_ runtime: JavaScriptRuntime, _ pointee: consuming facebook.jsi.Function) {
     self.runtime = runtime
     self.pointee = pointee
   }
@@ -71,22 +71,24 @@ public struct JavaScriptFunction: ~Copyable, JSRepresentable {
     let jsiRuntime = runtime.pointee
     return JavaScriptObject(runtime, expo.valueFromFunction(jsiRuntime, pointee).getObject(jsiRuntime))
   }
+}
 
-  // MARK: - JSRepresentable
-
-  public static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptFunction {
-    fatalError("Not implemented")
-  }
-
+/* public */ extension JavaScriptFunction: JSRepresentable {
   public static func fromJSValue(_ value: borrowing JavaScriptValue) -> JavaScriptFunction {
     return value.getFunction()
   }
 
-  public func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
-    return toValue().pointee
-  }
-
   public func toJSValue(in runtime: JavaScriptRuntime) -> JavaScriptValue {
     return toValue()
+  }
+}
+
+/* internal */ extension JavaScriptFunction: JSIRepresentable {
+  internal static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptFunction {
+    fatalError("Unimplemented")
+  }
+
+  internal func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
+    return toValue().pointee
   }
 }

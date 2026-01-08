@@ -1,9 +1,9 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
-import jsi
-import ExpoModulesJSI_Cxx
+internal import jsi
+internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptValue: JSRepresentable, Sendable, ~Copyable {
+public struct JavaScriptValue: Sendable, ~Copyable {
   internal weak var runtime: JavaScriptRuntime?
   internal let pointee: facebook.jsi.Value
 
@@ -51,6 +51,14 @@ public struct JavaScriptValue: JSRepresentable, Sendable, ~Copyable {
    Creates a JS value from a JS representable.
    */
   public init(_ runtime: JavaScriptRuntime, _ value: JSRepresentable) {
+    self.runtime = runtime
+    self.pointee = value.toJSValue(in: runtime).pointee
+  }
+
+  /**
+   Creates a JS value from a JSI representable.
+   */
+  internal init(_ runtime: JavaScriptRuntime, _ value: JSIRepresentable) {
     self.runtime = runtime
     self.pointee = value.toJSIValue(in: runtime.pointee)
   }
@@ -268,22 +276,24 @@ public struct JavaScriptValue: JSRepresentable, Sendable, ~Copyable {
     }
     return .undefined
   }
+}
 
-  // MARK: - JSRepresentable
-
-  public static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptValue {
-    fatalError("Not implemented")
-  }
-
+extension JavaScriptValue: JSRepresentable {
   public static func fromJSValue(_ value: borrowing JavaScriptValue) -> JavaScriptValue {
     return value.copy()
   }
 
-  public func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
-    return facebook.jsi.Value(runtime, pointee)
-  }
-
   public func toJSValue(in runtime: JavaScriptRuntime) -> JavaScriptValue {
     return self.copy()
+  }
+}
+
+extension JavaScriptValue: JSIRepresentable {
+  internal/*!*/ static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptValue {
+    fatalError("Unimplemented")
+  }
+
+  internal/*!*/ func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
+    return facebook.jsi.Value(runtime, pointee)
   }
 }

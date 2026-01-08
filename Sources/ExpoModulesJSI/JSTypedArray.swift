@@ -1,6 +1,7 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
-import ExpoModulesJSI_Cxx
+internal import jsi
+internal import ExpoModulesJSI_Cxx
 
 public struct JavaScriptTypedArray: ~Copyable {
   internal weak var runtime: JavaScriptRuntime?

@@ -1,26 +1,39 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
-import jsi
-import ExpoModulesJSI_Cxx
+internal import jsi
+internal import ExpoModulesJSI_Cxx
 
 open class JavaScriptRuntime: Equatable, @unchecked Sendable {
-  // TODO: Make it internal
-  public let pointee: facebook.jsi.Runtime
-  internal let scheduler: expo.RuntimeScheduler
+  internal/*!*/ let pointee: facebook.jsi.Runtime
+  internal/*!*/ let scheduler: expo.RuntimeScheduler
 
   /**
    Creates a runtime from a JSI runtime.
    */
-  public init(_ runtime: facebook.jsi.Runtime) {
+  internal/*!*/ /*override*/ init(_ runtime: facebook.jsi.Runtime) {
     self.pointee = runtime
     self.scheduler = expo.RuntimeScheduler(runtime)
+//    super.init(runtime)
   }
 
   /**
    Creates Hermes runtime.
    */
-  public convenience init() {
-    self.init(expo.createHermesRuntime())
+  public /*override*/ init() {
+    self.pointee = expo.createHermesRuntime()
+    self.scheduler = expo.RuntimeScheduler(pointee)
+  }
+
+  public init(_ runtime: UnsafeRawPointer) {
+    self.pointee = runtime.load(as: facebook.jsi.Runtime.self)
+    self.scheduler = expo.RuntimeScheduler(pointee)
+  }
+
+  /**
+   DO NOT USE IT
+   */
+  public var unsafe_pointee: UnsafeRawPointer {
+    return UnsafeRawPointer(Unmanaged<facebook.jsi.Runtime>.passUnretained(pointee).toOpaque())
   }
 
   /**
@@ -51,28 +64,30 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    Creates a JavaScript host object with given implementations for property getter, property setter, property names getter and dealloc.
    */
   public func createHostObject(
-    get: @Sendable @escaping (_ propertyName: String) -> JavaScriptValue,
-    set: @Sendable @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
+    get: @escaping (_ propertyName: String) -> JavaScriptValue,
+    set: @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
     getPropertyNames: @escaping () -> [String],
     dealloc: @escaping () -> Void
   ) -> JavaScriptObject {
-//    return JavaScriptHostObject(self, get: get, set: set, getPropertyNames: getPropertyNames, dealloc: dealloc)
-    let hostObject = expo.HostObject.makeObject(
-      pointee,
-      { (propertyName: std.string) -> facebook.jsi.Value in
-        return .undefined()
-//        return get(String(propertyName)).pointee
-      },
-      { (propertyName: std.string, value: borrowing facebook.jsi.Value) in
-        set(String(propertyName), JavaScriptValue(self, value))
-      },
-      {
-        return []
-      },
-      {
-        dealloc()
-      }
-    )
+//    func destroy(context: UnsafeMutableRawPointer) {
+//      // Release the void* holding our `ClosureWrapper`
+//      Unmanaged<AnyObject>.fromOpaque(context).release()
+//    }
+
+    let getFn = expo.HostObject.GetFunction { (propertyName: std.string)  in
+      return .undefined()
+      //        return get(String(propertyName)).pointee
+    }
+    let setFn = expo.HostObject.SetFunction { (propertyName: std.string, value: borrowing facebook.jsi.Value) in
+      set(String(propertyName), JavaScriptValue(self, value))
+    }
+    let getPropertyNamesFn = expo.HostObject.GetPropertyNamesFunction {
+      return []
+    }
+    let deallocFn = expo.HostObject.DeallocFunction {
+//      dealloc()
+    }
+    let hostObject = expo.HostObject.makeObject(pointee, getFn, setFn, getPropertyNamesFn, deallocFn)
     return JavaScriptObject(self, hostObject)
   }
 

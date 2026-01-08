@@ -1,9 +1,9 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
-import jsi
-import ExpoModulesJSI_Cxx
+internal import jsi
+internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptObject: JSRepresentable, Sendable, ~Copyable {
+public struct JavaScriptObject: Sendable, ~Copyable {
   internal let runtime: JavaScriptRuntime
   internal var pointee: facebook.jsi.Object
 
@@ -22,11 +22,15 @@ public struct JavaScriptObject: JSRepresentable, Sendable, ~Copyable {
     self.pointee = dictionary.toJSIValue(in: runtime.pointee).getObject(runtime.pointee)
   }
 
+//  public init(_ runtime: JavaScriptRuntime, _ object: UnsafeRawPointer) {
+//    self.runtime = runtime
+//    self.pointee = object.load(as: facebook.jsi.Object.self)
+//  }
+
   /**
    Creates a new object from existing JSI object.
-   - TODO: Make it internal
    */
-  public init(_ runtime: JavaScriptRuntime, _ object: consuming facebook.jsi.Object) {
+  internal/*!*/ init(_ runtime: JavaScriptRuntime, _ object: consuming facebook.jsi.Object) {
     self.runtime = runtime
     self.pointee = object
   }
@@ -66,7 +70,12 @@ public struct JavaScriptObject: JSRepresentable, Sendable, ~Copyable {
     expo.setProperty(runtime.pointee, pointee, name, value.pointee)
   }
 
-  public func setProperty(_ name: String, value: consuming JSRepresentable) {
+  public func setProperty<Value: JSRepresentable>(_ name: String, value: consuming Value) {
+    let jsiValue = value.toJSValue(in: runtime).pointee
+    expo.setProperty(runtime.pointee, pointee, name, jsiValue)
+  }
+
+  internal func setProperty<Value: JSRepresentable>(_ name: String, value: consuming Value) where Value: JSIRepresentable {
     let jsiValue = value.toJSIValue(in: runtime.pointee)
     expo.setProperty(runtime.pointee, pointee, name, jsiValue)
   }
@@ -120,22 +129,25 @@ public struct JavaScriptObject: JSRepresentable, Sendable, ~Copyable {
     pointee.setExternalMemoryPressure(runtime.pointee, size)
   }
 
-  // MARK: - JSRepresentable
+}
 
-  public static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptObject {
-    fatalError()
-  }
-
+extension JavaScriptObject: JSRepresentable {
   public static func fromJSValue(_ value: borrowing JavaScriptValue) -> JavaScriptObject {
     return value.getObject()
   }
 
-  public func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
-    return toValue().pointee
-  }
-
   public func toJSValue(in runtime: JavaScriptRuntime) -> JavaScriptValue {
     return toValue()
+  }
+}
+
+extension JavaScriptObject: JSIRepresentable {
+  internal/*!*/ static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptObject {
+    fatalError("Unimplemented")
+  }
+
+  internal/*!*/ func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
+    return toValue().pointee
   }
 }
 
@@ -151,7 +163,6 @@ public struct PropertyOptions: OptionSet, Sendable {
   public static let writable = PropertyOptions(rawValue: 1 << 2)
 }
 
-@available(iOS 16.4, *)
 public struct PropertyDescriptor: ~Copyable {
   let configurable: Bool
   let enumerable: Bool

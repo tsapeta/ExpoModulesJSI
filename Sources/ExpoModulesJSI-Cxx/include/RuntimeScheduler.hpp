@@ -4,7 +4,7 @@
 
 #include <memory>
 #include <swift/bridging>
-#include <jsi.h>
+#include "jsi.h"
 
 namespace facebook::react {
 
