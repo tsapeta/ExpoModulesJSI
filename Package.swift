@@ -27,7 +27,14 @@ let package = Package(
         .headerSearchPath("./Sources/jsi"),
       ],
       swiftSettings: [
-        .interoperabilityMode(.Cxx)
+        .interoperabilityMode(.Cxx),
+        .unsafeFlags([
+          "-enable-library-evolution",
+          "-emit-module-interface",
+          "-no-verify-emitted-module-interface",
+          "-Xfrontend",
+          "-clang-header-expose-decls=has-expose-attr",
+        ])
       ],
     ),
 
