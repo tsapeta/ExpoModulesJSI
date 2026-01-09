@@ -11,6 +11,7 @@ let package = Package(
   products: [
     .library(
       name: "ExpoModulesJSI",
+      type: .dynamic,
       targets: ["ExpoModulesJSI"]
     ),
   ],
@@ -21,10 +22,9 @@ let package = Package(
       name: "ExpoModulesJSI",
       dependencies: [
         "ExpoModulesJSI-Cxx",
-        "jsi"
       ],
       cxxSettings: [
-        .headerSearchPath("./Sources/jsi"),
+        .headerSearchPath("../jsi"),
       ],
       swiftSettings: [
         .interoperabilityMode(.Cxx),
@@ -36,23 +36,25 @@ let package = Package(
           "-clang-header-expose-decls=has-expose-attr",
         ])
       ],
+      linkerSettings: [
+        .unsafeFlags([
+          "-Wl", "-undefined", "dynamic_lookup"
+        ]),
+      ],
     ),
 
     // C++ target
     .target(
       name: "ExpoModulesJSI-Cxx",
-      dependencies: [
-        "jsi"
-      ],
-      cxxSettings: [
-        .headerSearchPath("./Sources/jsi"),
-      ],
-    ),
-
-    // JSI headers
-    .target(
-      name: "jsi",
       dependencies: [],
+      cxxSettings: [
+        .headerSearchPath("../jsi"),
+      ],
+      linkerSettings: [
+        .unsafeFlags([
+          "-Wl", "-undefined", "dynamic_lookup"
+        ]),
+      ],
     ),
 
     // Tests
