@@ -7,26 +7,29 @@
 
 namespace expo {
 
-template <typename ReturnType, typename... Args>
+template <typename Return, typename ...Args>
 class CxxClosure final {
 public:
-  using CallFn = ReturnType(^)(Args...);
-  using DeleterFn = void(void *_Nonnull);
+  using Closure = Return(^_Nonnull)(void *_Nonnull, Args...);
+  using Releaser = void(void *_Nonnull);
 
-  explicit CxxClosure(CallFn _Nonnull call) {//}, DeleterFn *_Nonnull deleter) {
-    std::shared_ptr<CallFn> sharedCall = std::make_shared<CallFn>(call);
+  explicit CxxClosure(void *_Nonnull context, Closure *_Nonnull closure, Releaser *_Nonnull releaser) {
+    std::shared_ptr<void> sharedContext(context, releaser);
 
-    _function = [sharedCall = std::move(sharedCall)](Args... args) {
-      return (*sharedCall)(args...);
+    // Create a std::function that captures the context pointer and the closure.
+    // Once it gets destroyed, `releaser()` gets called.
+    _function = [sharedContext = std::move(sharedContext), closure](Args... args) {
+      return closure(sharedContext.get(), args...);
     };
   }
 
-  inline ReturnType operator()(Args... args) {
+  inline Return operator()(Args... args) {
     return _function(args...);
   }
 
 private:
-  std::function<ReturnType(Args...)> _function;
+  std::function<Return(Args...)> _function;
+
 };
 
 } // namespace expo

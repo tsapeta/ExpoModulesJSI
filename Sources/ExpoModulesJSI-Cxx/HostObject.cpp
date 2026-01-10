@@ -5,24 +5,24 @@
 namespace expo {
 
 HostObject::HostObject(GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc)
-  : jsi::HostObject(), _get(std::move(get)), _set(set), _getPropertyNames(getPropertyNames), _dealloc(dealloc) {}
+  : jsi::HostObject(), _get(get), _set(set), _getPropertyNames(getPropertyNames), _dealloc(dealloc) {}
 
 HostObject::~HostObject() {
   _dealloc();
 }
 
 jsi::Value HostObject::get(jsi::Runtime &runtime, const jsi::PropNameID &name) {
-  auto str = name.utf8(runtime);
-  return jsi::Value();
-//  return _get(str);
+  printf("DUPA get: %s", name.utf8(runtime).c_str());
+  return _get(name.utf8(runtime).c_str());
 }
 
 void HostObject::set(jsi::Runtime &runtime, const jsi::PropNameID &name, const jsi::Value &value) {
-  _set(name.utf8(runtime), value);
+  printf("DUPA set: %s", name.utf8(runtime).c_str());
+  _set(name.utf8(runtime).c_str(), &value);
 }
 
 std::vector<jsi::PropNameID> HostObject::getPropertyNames(jsi::Runtime &runtime) {
-  std::vector<std::string> propertyNames = _getPropertyNames();
+  std::vector<const char *> propertyNames = _getPropertyNames();
   std::vector<jsi::PropNameID> propertyNamesIds;
 
   propertyNamesIds.reserve(propertyNames.capacity());

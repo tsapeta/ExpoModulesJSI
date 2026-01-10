@@ -245,19 +245,19 @@ public struct JavaScriptValue: Sendable, ~Copyable {
 
   // MARK: - Runtime-free initializers
 
-  public static var undefined: JavaScriptValue {
+  public static func undefined() -> JavaScriptValue {
     return JavaScriptValue(nil, facebook.jsi.Value.undefined())
   }
 
-  public static var null: JavaScriptValue {
+  public static func null() -> JavaScriptValue {
     return JavaScriptValue(nil, facebook.jsi.Value.null())
   }
 
-  public static var `true`: JavaScriptValue {
+  public static func `true`() -> JavaScriptValue {
     return JavaScriptValue(nil, facebook.jsi.Value(true))
   }
 
-  public static var `false`: JavaScriptValue {
+  public static func `false`() -> JavaScriptValue {
     return JavaScriptValue(nil, facebook.jsi.Value(false))
   }
 
@@ -274,7 +274,7 @@ public struct JavaScriptValue: Sendable, ~Copyable {
     if let value = value as? JSRepresentable {
       return value.toJSValue(in: runtime)
     }
-    return .undefined
+    return .undefined()
   }
 }
 

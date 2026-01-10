@@ -6,18 +6,20 @@ import PackageDescription
 let package = Package(
   name: "ExpoModulesJSI",
   platforms: [
-    .iOS("16.4")
+    .iOS("16.4"),
+    .tvOS("16.4"),
+    .macOS("12.0"),
   ],
   products: [
     .library(
       name: "ExpoModulesJSI",
       type: .dynamic,
-      targets: ["ExpoModulesJSI"]
+      targets: ["ExpoModulesJSI"],
     ),
   ],
   dependencies: [],
   targets: [
-    // Main, Swift-only target
+    // Swift target (public)
     .target(
       name: "ExpoModulesJSI",
       dependencies: [
@@ -36,14 +38,10 @@ let package = Package(
           "-clang-header-expose-decls=has-expose-attr",
         ])
       ],
-      linkerSettings: [
-        .unsafeFlags([
-          "-Wl", "-undefined", "dynamic_lookup"
-        ]),
-      ],
+      linkerSettings: [],
     ),
 
-    // C++ target
+    // C++ target (internal)
     .target(
       name: "ExpoModulesJSI-Cxx",
       dependencies: [],

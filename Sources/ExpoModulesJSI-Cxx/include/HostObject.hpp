@@ -13,9 +13,10 @@ namespace expo {
 
 class JSI_EXPORT HostObject : public jsi::HostObject {
 public:
-  using GetFunction = CxxClosure<jsi::Value, std::string>;
-  using SetFunction = CxxClosure<void, std::string, const jsi::Value &>;
-  using GetPropertyNamesFunction = CxxClosure<std::vector<std::string>>;
+  using StringVector = std::vector<const char *>;
+  using GetFunction = CxxClosure<jsi::Value, const char *>;
+  using SetFunction = CxxClosure<void, const char *, const jsi::Value *>;
+  using GetPropertyNamesFunction = CxxClosure<StringVector>;
   using DeallocFunction = CxxClosure<void>;
 
   HostObject(GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc);

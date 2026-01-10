@@ -1,11 +1,105 @@
 // Copyright 2025-present 650 Industries. All rights reserved.
 
+import Foundation
+
 internal import jsi
 internal import ExpoModulesJSI_Cxx
+
+class ClosureWrapper<Closure> {
+  let call: Closure
+  init(_ call: Closure) {
+    self.call = call
+  }
+}
+
+extension expo.HostObject.GetFunction {
+  typealias SwiftClosure = (String) -> facebook.jsi.Value
+  typealias Wrapper = ClosureWrapper<SwiftClosure>
+
+  init(_ closure: @escaping SwiftClosure) {
+    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
+
+    func call(context: UnsafeMutableRawPointer, property: UnsafePointer<CChar>?) -> facebook.jsi.Value {
+      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
+      return closure.call(String(cString: property!))
+    }
+    func destroy(context: UnsafeMutableRawPointer) {
+      Unmanaged<Wrapper>.fromOpaque(context).release()
+    }
+    self.init(context, call, destroy)
+  }
+}
+
+extension expo.HostObject.SetFunction {
+  typealias SwiftClosure = (String, UnsafePointer<facebook.jsi.Value>?) -> Void
+  typealias Wrapper = ClosureWrapper<SwiftClosure>
+
+  init(_ closure: @escaping SwiftClosure) {
+    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
+
+    func call(context: UnsafeMutableRawPointer, property: UnsafePointer<CChar>?, value: UnsafePointer<facebook.jsi.Value>?) {
+      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
+      return closure.call(String(cString: property!), value)
+    }
+    func destroy(context: UnsafeMutableRawPointer) {
+      Unmanaged<Wrapper>.fromOpaque(context).release()
+    }
+    self.init(context, call, destroy)
+  }
+}
+
+extension expo.HostObject.GetPropertyNamesFunction {
+  typealias SwiftClosure = () -> [String]
+  typealias Wrapper = ClosureWrapper<SwiftClosure>
+
+  init(_ closure: @escaping SwiftClosure) {
+    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
+
+    func call(context: UnsafeMutableRawPointer) -> expo.HostObject.StringVector {
+      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
+      let propertyNames = closure.call()
+      var vector = expo.HostObject.StringVector()
+
+      vector.reserve(propertyNames.count)
+
+      for propertyName in propertyNames {
+        vector.push_back(propertyName)
+      }
+      return vector
+    }
+    func destroy(context: UnsafeMutableRawPointer) {
+      Unmanaged<Wrapper>.fromOpaque(context).release()
+    }
+    self.init(context, call, destroy)
+  }
+}
+
+extension expo.HostObject.DeallocFunction {
+  typealias SwiftClosure = () -> Void
+  typealias Wrapper = ClosureWrapper<SwiftClosure>
+
+  init(_ closure: @escaping SwiftClosure) {
+    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
+
+    func call(context: UnsafeMutableRawPointer) {
+      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
+      closure.call()
+    }
+    func destroy(context: UnsafeMutableRawPointer) {
+      Unmanaged<Wrapper>.fromOpaque(context).release()
+    }
+    self.init(context, call, destroy)
+  }
+}
 
 open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   internal/*!*/ let pointee: facebook.jsi.Runtime
   internal/*!*/ let scheduler: expo.RuntimeScheduler
+
+  public init(provider: JavaScriptRuntimeProvider) {
+    self.pointee = provider.consume()
+    self.scheduler = expo.RuntimeScheduler(pointee)
+  }
 
   /**
    Creates a runtime from a JSI runtime.
@@ -64,30 +158,23 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    Creates a JavaScript host object with given implementations for property getter, property setter, property names getter and dealloc.
    */
   public func createHostObject(
-    get: @escaping (_ propertyName: String) -> JavaScriptValue,
-    set: @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
-    getPropertyNames: @escaping () -> [String],
-    dealloc: @escaping () -> Void
+    get: @Sendable @escaping (_ propertyName: String) -> JavaScriptValue,
+    set: @Sendable @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
+    getPropertyNames: @Sendable @escaping () -> [String],
+    dealloc: @Sendable @escaping () -> Void
   ) -> JavaScriptObject {
-//    func destroy(context: UnsafeMutableRawPointer) {
-//      // Release the void* holding our `ClosureWrapper`
-//      Unmanaged<AnyObject>.fromOpaque(context).release()
-//    }
-
-    let getFn = expo.HostObject.GetFunction { (propertyName: std.string)  in
+    let getter = expo.HostObject.GetFunction { property in
       return .undefined()
-      //        return get(String(propertyName)).pointee
     }
-    let setFn = expo.HostObject.SetFunction { (propertyName: std.string, value: borrowing facebook.jsi.Value) in
-      set(String(propertyName), JavaScriptValue(self, value))
+    let setter = expo.HostObject.SetFunction { (property: String, value: UnsafePointer<facebook.jsi.Value>?) in
+      let value = value != nil ? facebook.jsi.Value(self.pointee, value!.pointee) : facebook.jsi.Value.undefined()
+      set(property, JavaScriptValue(self, value))
     }
-    let getPropertyNamesFn = expo.HostObject.GetPropertyNamesFunction {
-      return []
+    let propertyNamesGetter = expo.HostObject.GetPropertyNamesFunction {
+      return getPropertyNames()
     }
-    let deallocFn = expo.HostObject.DeallocFunction {
-//      dealloc()
-    }
-    let hostObject = expo.HostObject.makeObject(pointee, getFn, setFn, getPropertyNamesFn, deallocFn)
+    let dealloc = expo.HostObject.DeallocFunction(dealloc)
+    let hostObject = expo.HostObject.makeObject(pointee, getter, setter, propertyNamesGetter, dealloc)
     return JavaScriptObject(self, hostObject)
   }
 
@@ -159,7 +246,7 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
 //        }
 //      }
 //      return facebook.react.createPromiseAsJSIValue(pointee, promiseSetup)
-      return .undefined
+      return .undefined()
     }
   }
 

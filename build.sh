@@ -1,28 +1,34 @@
+#!/bin/bash
 
-XCARCHIVE_DEVICE_PATH="Products/ExpoModulesJSI-iOS.xcarchive"
-XCARCHIVE_SIMULATOR_PATH="Products/ExpoModulesJSI-iOS-Simulator.xcarchive"
-XCFRAMEWORK_PATH="Products/ExpoModulesJSI.xcframework"
-FRAMEWORKS_PATH="/Library/Frameworks"
+set -e
 
-# Build archive for iOS devices
+PACKAGE_NAME="ExpoModulesJSI"
+XCFRAMEWORK_PATH="Products/$PACKAGE_NAME.xcframework"
+DERIVED_DATA_PATH=".DerivedData"
+PRODUCTS_PATH="$DERIVED_DATA_PATH/Build/Products"
+
+# Clean products folder
+rm -rf $PRODUCTS_PATH
+
 xcodebuild \
-  archive \
-  -scheme "ExpoModulesJSI" \
+  build \
+  -scheme "$PACKAGE_NAME" \
   -destination "generic/platform=iOS" \
-  -archivePath "$XCARCHIVE_DEVICE_PATH" \
-  SKIP_INSTALL=NO \
+  -derivedDataPath "$DERIVED_DATA_PATH" \
+  -configuration Release \
   BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-  INSTALL_PATH="$FRAMEWORKS_PATH"
+  SKIP_INSTALL=NO \
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
 
-# Build archive for simulator
 xcodebuild \
-  archive \
-  -scheme "ExpoModulesJSI" \
+  build \
+  -scheme "$PACKAGE_NAME" \
   -destination "generic/platform=iOS Simulator" \
-  -archivePath "$XCARCHIVE_SIMULATOR_PATH" \
-  SKIP_INSTALL=NO \
+  -derivedDataPath "$DERIVED_DATA_PATH" \
+  -configuration Release \
   BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-  INSTALL_PATH="$FRAMEWORKS_PATH"
+  SKIP_INSTALL=NO \
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
 
 # Remove existing .xcframework
 rm -rf $XCFRAMEWORK_PATH
@@ -30,8 +36,29 @@ rm -rf $XCFRAMEWORK_PATH
 # Create .xcframework
 xcodebuild \
   -create-xcframework \
-  -archive "$XCARCHIVE_DEVICE_PATH" \
-  -framework "ExpoModulesJSI.framework" \
-  -archive "$XCARCHIVE_SIMULATOR_PATH" \
-  -framework "ExpoModulesJSI.framework" \
+  -framework "./$PRODUCTS_PATH/Release-iphoneos/PackageFrameworks/$PACKAGE_NAME.framework" \
+  -framework "./$PRODUCTS_PATH/Release-iphonesimulator/PackageFrameworks/$PACKAGE_NAME.framework" \
   -output "$XCFRAMEWORK_PATH"
+
+for product_path in $PRODUCTS_PATH/*/; do
+  swiftmodule_src_path="${product_path}${PACKAGE_NAME}.swiftmodule"
+
+  for slice_path in $XCFRAMEWORK_PATH/*/; do
+    framework_path="${slice_path}${PACKAGE_NAME}.framework"
+    framework_modules_path="${framework_path}/Modules"
+    swiftmodule_dest_path="${framework_modules_path}/${PACKAGE_NAME}.swiftmodule"
+
+    # Make `Modules` directory and copy `.swiftmodule`
+    mkdir -p $framework_modules_path
+    cp -r $swiftmodule_src_path/ $swiftmodule_dest_path
+
+    # We don't need this dir
+    rm -rf "${swiftmodule_dest_path}/Project"
+  done
+done
+
+# Copy to my expo repo
+cp -r $XCFRAMEWORK_PATH ../expo/packages/expo-modules-core
+
+#  -debug-symbols "./$PRODUCTS_PATH/Release-iphonesimulator/ExpoModulesJSI.framework.dSYM" \
+#  -debug-symbols "./$PRODUCTS_PATH/Release-iphoneos/ExpoModulesJSI.framework.dSYM" \

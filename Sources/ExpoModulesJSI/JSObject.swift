@@ -66,7 +66,7 @@ public struct JavaScriptObject: Sendable, ~Copyable {
   }
 
   public func setProperty(_ name: String, value: consuming JavaScriptValue?) {
-    let value = value ?? .null
+    let value = value ?? .null()
     expo.setProperty(runtime.pointee, pointee, name, value.pointee)
   }
 
