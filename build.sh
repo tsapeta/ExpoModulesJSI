@@ -10,15 +10,15 @@ PRODUCTS_PATH="$DERIVED_DATA_PATH/Build/Products"
 # Clean products folder
 rm -rf $PRODUCTS_PATH
 
-xcodebuild \
-  build \
-  -scheme "$PACKAGE_NAME" \
-  -destination "generic/platform=iOS" \
-  -derivedDataPath "$DERIVED_DATA_PATH" \
-  -configuration Release \
-  BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-  SKIP_INSTALL=NO \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
+#xcodebuild \
+#  build \
+#  -scheme "$PACKAGE_NAME" \
+#  -destination "generic/platform=iOS" \
+#  -derivedDataPath "$DERIVED_DATA_PATH" \
+#  -configuration Release \
+#  BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+#  SKIP_INSTALL=NO \
+#  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
 
 xcodebuild \
   build \
@@ -36,9 +36,12 @@ rm -rf $XCFRAMEWORK_PATH
 # Create .xcframework
 xcodebuild \
   -create-xcframework \
-  -framework "./$PRODUCTS_PATH/Release-iphoneos/PackageFrameworks/$PACKAGE_NAME.framework" \
   -framework "./$PRODUCTS_PATH/Release-iphonesimulator/PackageFrameworks/$PACKAGE_NAME.framework" \
   -output "$XCFRAMEWORK_PATH"
+
+#  -framework "./$PRODUCTS_PATH/Release-iphoneos/PackageFrameworks/$PACKAGE_NAME.framework"
+#  -debug-symbols "./$PRODUCTS_PATH/Release-iphonesimulator/ExpoModulesJSI.framework.dSYM" \
+#  -debug-symbols "./$PRODUCTS_PATH/Release-iphoneos/ExpoModulesJSI.framework.dSYM" \
 
 for product_path in $PRODUCTS_PATH/*/; do
   swiftmodule_src_path="${product_path}${PACKAGE_NAME}.swiftmodule"
@@ -59,6 +62,3 @@ done
 
 # Copy to my expo repo
 cp -r $XCFRAMEWORK_PATH ../expo/packages/expo-modules-core
-
-#  -debug-symbols "./$PRODUCTS_PATH/Release-iphonesimulator/ExpoModulesJSI.framework.dSYM" \
-#  -debug-symbols "./$PRODUCTS_PATH/Release-iphoneos/ExpoModulesJSI.framework.dSYM" \

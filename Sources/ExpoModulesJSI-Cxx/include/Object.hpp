@@ -3,7 +3,6 @@
 #ifdef __cplusplus
 
 #import <swift/bridging>
-
 #import "jsi.h"
 #import "JSIUtils.hpp"
 

@@ -5,93 +5,6 @@ import Foundation
 internal import jsi
 internal import ExpoModulesJSI_Cxx
 
-class ClosureWrapper<Closure> {
-  let call: Closure
-  init(_ call: Closure) {
-    self.call = call
-  }
-}
-
-extension expo.HostObject.GetFunction {
-  typealias SwiftClosure = (String) -> facebook.jsi.Value
-  typealias Wrapper = ClosureWrapper<SwiftClosure>
-
-  init(_ closure: @escaping SwiftClosure) {
-    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
-
-    func call(context: UnsafeMutableRawPointer, property: UnsafePointer<CChar>?) -> facebook.jsi.Value {
-      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
-      return closure.call(String(cString: property!))
-    }
-    func destroy(context: UnsafeMutableRawPointer) {
-      Unmanaged<Wrapper>.fromOpaque(context).release()
-    }
-    self.init(context, call, destroy)
-  }
-}
-
-extension expo.HostObject.SetFunction {
-  typealias SwiftClosure = (String, UnsafePointer<facebook.jsi.Value>?) -> Void
-  typealias Wrapper = ClosureWrapper<SwiftClosure>
-
-  init(_ closure: @escaping SwiftClosure) {
-    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
-
-    func call(context: UnsafeMutableRawPointer, property: UnsafePointer<CChar>?, value: UnsafePointer<facebook.jsi.Value>?) {
-      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
-      return closure.call(String(cString: property!), value)
-    }
-    func destroy(context: UnsafeMutableRawPointer) {
-      Unmanaged<Wrapper>.fromOpaque(context).release()
-    }
-    self.init(context, call, destroy)
-  }
-}
-
-extension expo.HostObject.GetPropertyNamesFunction {
-  typealias SwiftClosure = () -> [String]
-  typealias Wrapper = ClosureWrapper<SwiftClosure>
-
-  init(_ closure: @escaping SwiftClosure) {
-    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
-
-    func call(context: UnsafeMutableRawPointer) -> expo.HostObject.StringVector {
-      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
-      let propertyNames = closure.call()
-      var vector = expo.HostObject.StringVector()
-
-      vector.reserve(propertyNames.count)
-
-      for propertyName in propertyNames {
-        vector.push_back(propertyName)
-      }
-      return vector
-    }
-    func destroy(context: UnsafeMutableRawPointer) {
-      Unmanaged<Wrapper>.fromOpaque(context).release()
-    }
-    self.init(context, call, destroy)
-  }
-}
-
-extension expo.HostObject.DeallocFunction {
-  typealias SwiftClosure = () -> Void
-  typealias Wrapper = ClosureWrapper<SwiftClosure>
-
-  init(_ closure: @escaping SwiftClosure) {
-    let context = Unmanaged.passRetained(Wrapper(closure)).toOpaque()
-
-    func call(context: UnsafeMutableRawPointer) {
-      let closure = Unmanaged<Wrapper>.fromOpaque(context).takeUnretainedValue()
-      closure.call()
-    }
-    func destroy(context: UnsafeMutableRawPointer) {
-      Unmanaged<Wrapper>.fromOpaque(context).release()
-    }
-    self.init(context, call, destroy)
-  }
-}
-
 open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   internal/*!*/ let pointee: facebook.jsi.Runtime
   internal/*!*/ let scheduler: expo.RuntimeScheduler
@@ -158,23 +71,45 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    Creates a JavaScript host object with given implementations for property getter, property setter, property names getter and dealloc.
    */
   public func createHostObject(
-    get: @Sendable @escaping (_ propertyName: String) -> JavaScriptValue,
-    set: @Sendable @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
-    getPropertyNames: @Sendable @escaping () -> [String],
-    dealloc: @Sendable @escaping () -> Void
+    get: @escaping (_ propertyName: String) -> JavaScriptValue,
+    set: @escaping (_ propertyName: String, _ value: consuming JavaScriptValue) -> Void,
+    getPropertyNames: @escaping () -> [String],
+    dealloc: @escaping () -> Void
   ) -> JavaScriptObject {
-    let getter = expo.HostObject.GetFunction { property in
-      return .undefined()
+    func getter(context: UnsafeMutableRawPointer, propertyName: UnsafePointer<CChar>) -> facebook.jsi.Value {
+      let context = Unmanaged<HostObjectContext>.fromOpaque(context).takeUnretainedValue()
+      return context.get(String(cString: propertyName)).pointee
     }
-    let setter = expo.HostObject.SetFunction { (property: String, value: UnsafePointer<facebook.jsi.Value>?) in
-      let value = value != nil ? facebook.jsi.Value(self.pointee, value!.pointee) : facebook.jsi.Value.undefined()
-      set(property, JavaScriptValue(self, value))
+
+    func setter(context: UnsafeMutableRawPointer, propertyName: UnsafePointer<CChar>, valuePointer: UnsafeMutableRawPointer) {
+      let context = Unmanaged<HostObjectContext>.fromOpaque(context).takeUnretainedValue()
+      let value = JavaScriptValue(context.runtime, valuePointer.assumingMemoryBound(to: facebook.jsi.Value.self).move())
+      context.set(String(cString: propertyName), value)
     }
-    let propertyNamesGetter = expo.HostObject.GetPropertyNamesFunction {
-      return getPropertyNames()
+
+    func propertyNamesGetter(context: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
+      let context = Unmanaged<HostObjectContext>.fromOpaque(context).takeUnretainedValue()
+      let propertyNames = context.getPropertyNames()
+      var vector = expo.HostObjectCallbacks.StringVector()
+
+      vector.reserve(propertyNames.count)
+
+      for propertyName in propertyNames {
+        vector.push_back(propertyName.cString(using: .utf8))
+      }
+      return withUnsafeMutablePointer(to: &vector) { ptr in
+        return UnsafeMutableRawPointer(ptr)
+      }
     }
-    let dealloc = expo.HostObject.DeallocFunction(dealloc)
-    let hostObject = expo.HostObject.makeObject(pointee, getter, setter, propertyNamesGetter, dealloc)
+
+    func deallocate(context: UnsafeMutableRawPointer) {
+      Unmanaged<HostObjectContext>.fromOpaque(context).release()
+    }
+
+    let context = Unmanaged.passRetained(HostObjectContext(runtime: self, get, set, getPropertyNames, dealloc)).toOpaque()
+    let callbacks = expo.HostObjectCallbacks(context, getter, setter, propertyNamesGetter, deallocate)
+    let hostObject = expo.HostObject.makeObject(pointee, callbacks)
+
     return JavaScriptObject(self, hostObject)
   }
 
@@ -191,22 +126,39 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    - Returns: A JavaScript function represented as a `JavaScriptFunction`.
    */
   public func createSyncFunction(_ name: String, _ fn: @escaping SyncFunctionClosure) -> JavaScriptFunction {
-    let hostFunction = expo.createHostFunction(pointee, name) { runtime, this, arguments, count in
-      // Explicitly copy `this` as it's borrowed by the closure
-      let this = JavaScriptValue(self, facebook.jsi.Value(runtime, this))
-      let argumentsBuffer = JSValuesBuffer(self, start: arguments, count: count)
+    class HostFunctionContext {
+      let runtime: JavaScriptRuntime
+      let call: SyncFunctionClosure
 
-      // Remap a buffer with `jsi.Value` to a new buffer with `JavaScriptValue`
-//      let jsiArgumentsBuffer = UnsafeMutableBufferPointer<facebook.jsi.Value>(start: UnsafeMutablePointer(mutating: arguments), count: count)
-//      let argumentsBuffer = jsiArgumentsBuffer.remap({ JavaScriptValue(self, $0) })
+      init(runtime: JavaScriptRuntime, _ function: @escaping SyncFunctionClosure) {
+        self.runtime = runtime
+        self.call = function
+      }
+    }
+
+    let context = Unmanaged.passRetained(HostFunctionContext(runtime: self, fn)).toOpaque()
+
+    func call(context: UnsafeMutableRawPointer, thisPtr: UnsafePointer<facebook.jsi.Value>, argumentsPtr: UnsafePointer<facebook.jsi.Value>, argumentsCount: Int) -> facebook.jsi.Value {
+      let context = Unmanaged<HostFunctionContext>.fromOpaque(context).takeUnretainedValue()
+      let this = UnsafeMutablePointer(mutating: thisPtr).move()
+      let arguments = JSValuesBuffer(context.runtime, start: argumentsPtr, count: argumentsCount)
 
       do {
-        return try fn(this, argumentsBuffer).pointee
+        let result = try context.call(JavaScriptValue(context.runtime, this), arguments)
+        return result.pointee
       } catch {
         // TODO: Implement throwing `facebook.jsi.JSError`, returns `undefined` until then
         return .undefined()
       }
     }
+
+    func deallocate(context: UnsafeMutableRawPointer) {
+      Unmanaged<HostFunctionContext>.fromOpaque(context).release()
+    }
+
+    let closure = expo.HostFunctionClosure(context, call, deallocate)
+    let hostFunction = expo.createHostFunction(pointee, name.cString(using: .utf8), closure)
+
     return JavaScriptFunction(self, hostFunction)
   }
 

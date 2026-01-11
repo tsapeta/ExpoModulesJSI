@@ -4,6 +4,7 @@
 #ifdef __cplusplus
 
 #include "jsi.h"
+#include "HostFunctionClosure.h"
 
 namespace jsi = facebook::jsi;
 
@@ -75,10 +76,6 @@ void defineProperty(jsi::Runtime &runtime, const jsi::Object &object, const char
 
 namespace expo {
 
-using HostFunctionBlock = jsi::Value (^)(jsi::Runtime &runtime, const jsi::Value &thisValue, const jsi::Value *args, size_t argsCount);
-
-jsi::Function createHostFunction(jsi::Runtime &runtime, const char *name, HostFunctionBlock block);
-
 inline jsi::Value valueFromFunction(jsi::Runtime &runtime, const jsi::Function &function) {
   return jsi::Value(runtime, function);
 }
@@ -107,6 +104,8 @@ inline jsi::Value valueFromArray(jsi::Runtime &runtime, const jsi::Array &array)
 inline std::shared_ptr<const jsi::Buffer> makeSharedStringBuffer(const std::string &source) noexcept {
   return std::make_shared<jsi::StringBuffer>(source);
 }
+
+jsi::Function createHostFunction(jsi::Runtime &runtime, const char *name, HostFunctionClosure *closure);
 
 jsi::Runtime &createHermesRuntime();
 

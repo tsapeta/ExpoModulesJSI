@@ -4,8 +4,9 @@
 
 #import <string>
 #import <vector>
+
+#import "HostObjectCallbacks.h"
 #import "jsi.h"
-#import "CxxClosure.hpp"
 
 namespace jsi = facebook::jsi;
 
@@ -13,29 +14,41 @@ namespace expo {
 
 class JSI_EXPORT HostObject : public jsi::HostObject {
 public:
-  using StringVector = std::vector<const char *>;
-  using GetFunction = CxxClosure<jsi::Value, const char *>;
-  using SetFunction = CxxClosure<void, const char *, const jsi::Value *>;
-  using GetPropertyNamesFunction = CxxClosure<StringVector>;
-  using DeallocFunction = CxxClosure<void>;
 
-  HostObject(GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc);
+  explicit HostObject(HostObjectCallbacks *callbacks) : jsi::HostObject(), _callbacks(callbacks) {}
 
-  virtual ~HostObject();
+  virtual ~HostObject() {
+    _callbacks->dealloc();
+    delete _callbacks;
+  }
 
-  jsi::Value get(jsi::Runtime &runtime, const jsi::PropNameID &name) override;
+  inline jsi::Value get(jsi::Runtime &runtime, const jsi::PropNameID &name) override {
+    return _callbacks->get(name.utf8(runtime).c_str());
+  }
 
-  void set(jsi::Runtime &runtime, const jsi::PropNameID &name, const jsi::Value &value) override;
+  inline void set(jsi::Runtime &runtime, const jsi::PropNameID &name, const jsi::Value &value) override {
+    _callbacks->set(name.utf8(runtime).c_str(), value);
+  }
 
-  std::vector<jsi::PropNameID> getPropertyNames(jsi::Runtime &runtime) override;
+  /* inline */ std::vector<jsi::PropNameID> getPropertyNames(jsi::Runtime &runtime) override {
+    //  std::vector<const char *> propertyNames = _callbacks->_getPropertyNames();
+    std::vector<jsi::PropNameID> propertyNamesIds;
 
-  static jsi::Object makeObject(jsi::Runtime &runtime, GetFunction get, SetFunction set, GetPropertyNamesFunction getPropertyNames, DeallocFunction dealloc);
+    //  propertyNamesIds.reserve(propertyNames.capacity());
+
+    //  for (auto &name : propertyNames) {
+    //    propertyNamesIds.push_back(jsi::PropNameID::forUtf8(runtime, name));
+    //  }
+    return propertyNamesIds;
+  }
+
+  inline static jsi::Object makeObject(jsi::Runtime &runtime, HostObjectCallbacks *callbacks) {
+    return jsi::Object::createFromHostObject(runtime, std::make_shared<HostObject>(callbacks));
+  }
 
 private:
-  GetFunction _get;
-  SetFunction _set;
-  GetPropertyNamesFunction _getPropertyNames;
-  DeallocFunction _dealloc;
+  HostObjectCallbacks *_callbacks;
+
 }; // class HostObject
 
 } // namespace expo

@@ -150,10 +150,10 @@ namespace expo {
 
 #pragma mark - Host function
 
-jsi::Function createHostFunction(jsi::Runtime &runtime, const char *_Nonnull name, HostFunctionBlock block) {
+jsi::Function createHostFunction(jsi::Runtime &runtime, const char *name, HostFunctionClosure *closure) {
   jsi::PropNameID propName = jsi::PropNameID::forAscii(runtime, name);
-  return jsi::Function::createFromHostFunction(runtime, propName, 0, [block](jsi::Runtime &runtime, const jsi::Value &thisValue, const jsi::Value *_Nonnull args, size_t count) -> jsi::Value {
-    return block(runtime, thisValue, args, count);
+  return jsi::Function::createFromHostFunction(runtime, propName, 0, [closure](jsi::Runtime &runtime, const jsi::Value &thisValue, const jsi::Value *_Nonnull args, size_t count) -> jsi::Value {
+    return closure->call(&thisValue, args, count);
   });
 }
 
