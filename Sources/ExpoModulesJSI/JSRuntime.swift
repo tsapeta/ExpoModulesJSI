@@ -6,8 +6,21 @@ internal import jsi
 internal import ExpoModulesJSI_Cxx
 
 open class JavaScriptRuntime: Equatable, @unchecked Sendable {
+  /**
+   The underlying JSI runtime this `JavaScriptRuntime` points to.
+   Note that `facebook.jsi.Runtime` is annotated with `SWIFT_UNSAFE_REFERENCE` in our copy of `jsi.h` header,
+   so for the Swift compiler it is treated as a reference type (like `class` and not `struct`).
+   This is important because the `facebook.jsi.Runtime`:
+   - is an abstract class with many virtual methods. Swift/C++ interop does not support calling pure virtual methods on value types.
+   - is non-copyable. As a value type, we would have to "borrow" it from React Native in an unsafe manner.
+   */
   internal/*!*/ let pointee: facebook.jsi.Runtime
   internal/*!*/ let scheduler: expo.RuntimeScheduler
+
+  /**
+   Actor for running runtime work.
+   */
+  lazy var runtimeActor: JavaScriptRuntimeActor = JavaScriptRuntimeActor(runtime: self)
 
   public init(provider: JavaScriptRuntimeProvider) {
     self.pointee = provider.consume()
@@ -17,16 +30,15 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   /**
    Creates a runtime from a JSI runtime.
    */
-  internal/*!*/ /*override*/ init(_ runtime: facebook.jsi.Runtime) {
+  internal/*!*/ init(_ runtime: facebook.jsi.Runtime) {
     self.pointee = runtime
     self.scheduler = expo.RuntimeScheduler(runtime)
-//    super.init(runtime)
   }
 
   /**
    Creates Hermes runtime.
    */
-  public /*override*/ init() {
+  public init() {
     self.pointee = expo.createHermesRuntime()
     self.scheduler = expo.RuntimeScheduler(pointee)
   }
@@ -37,10 +49,11 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   }
 
   /**
-   DO NOT USE IT
+   Raw pointer to the underlying JSI runtime. DO NOT USE IT!
    */
-  public var unsafe_pointee: UnsafeRawPointer {
-    return UnsafeRawPointer(Unmanaged<facebook.jsi.Runtime>.passUnretained(pointee).toOpaque())
+  @_spi(Unsafe)
+  public var unsafe_pointee: UnsafeMutableRawPointer {
+    return Unmanaged<facebook.jsi.Runtime>.passUnretained(pointee).toOpaque()
   }
 
   /**
@@ -68,6 +81,15 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   }
 
   /**
+   Creates a new JavaScript object, using the prototype of the given class (function).
+   Calls `Object.create(klass.prototype)` under the hood.
+   */
+  public func createObject(ofClass klass: consuming JavaScriptFunction) -> JavaScriptObject {
+    var prototype = klass.asObject().getPrototype().getObject().pointee
+    return JavaScriptObject(self, expo.common.createObjectWithPrototype(pointee, &prototype))
+  }
+
+  /**
    Creates a JavaScript host object with given implementations for property getter, property setter, property names getter and dealloc.
    */
   public func createHostObject(
@@ -87,19 +109,18 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
       context.set(String(cString: propertyName), value)
     }
 
-    func propertyNamesGetter(context: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
+    func propertyNamesGetter(context: UnsafeMutableRawPointer) -> expo.HostObjectCallbacks.PropNameIds {
       let context = Unmanaged<HostObjectContext>.fromOpaque(context).takeUnretainedValue()
       let propertyNames = context.getPropertyNames()
-      var vector = expo.HostObjectCallbacks.StringVector()
+      var vector = expo.HostObjectCallbacks.PropNameIds()
 
       vector.reserve(propertyNames.count)
 
       for propertyName in propertyNames {
-        vector.push_back(propertyName.cString(using: .utf8))
+        let propNameId = facebook.jsi.PropNameID.forUtf8(context.runtime.pointee, std.string(propertyName))
+        vector.push_back(consuming: propNameId)
       }
-      return withUnsafeMutablePointer(to: &vector) { ptr in
-        return UnsafeMutableRawPointer(ptr)
-      }
+      return vector
     }
 
     func deallocate(context: UnsafeMutableRawPointer) {
@@ -118,7 +139,45 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   /**
    Type of the closure that is passed to the `createSyncFunction` function.
    */
-  public typealias SyncFunctionClosure = (_ this: consuming JavaScriptValue, _ arguments: consuming JSValuesBuffer) throws -> JavaScriptValue
+  public typealias SyncFunctionClosure = @JavaScriptActor (
+    _ this: consuming JavaScriptValue,
+    _ arguments: consuming JSValuesBuffer
+  ) throws -> JavaScriptValue
+
+  /**
+   Creates a class with the given name and native constructor.
+   */
+  public func createClass(name: String, inheriting baseClass: consuming JavaScriptFunction? = nil, _ constructor: @escaping SyncFunctionClosure) throws -> JavaScriptFunction {
+    // Host functions are not standard functions, thus cannot be used as class constructors.
+    // We're creating one by evaluating a script that calls a "native constructor" that is a host function.
+    let nativeConstructorKey = "__native_constructor__"
+    let klassValue = try eval(label: "\(name).\(nativeConstructorKey)", "(function \(name)(...args) { return this.\(nativeConstructorKey)(...args); })")
+    let klassObject = klassValue.getObject()
+
+    // Create a host function that is called by the constructor
+    let nativeConstructor = createSyncFunction(name) { this, arguments in
+      return try constructor(this, arguments)
+    }
+
+    print("DUPA 0:", name, klassObject.getProperty("name").getString(), klassObject.getPropertyNames())
+    print("DUPA 1:", klassObject.getPrototype().kind)
+
+    // Set native constructor as read-only, non-configurable, non-enumerable, non-writable property
+    let prototype = klassObject.getPrototype().getObject()
+    prototype.defineProperty(nativeConstructorKey, value: nativeConstructor, options: [.configurable, .writable])
+
+    // If the base class is provided, set the inherited prototype.
+    if let baseClass = baseClass?.asObject() {
+      // Inherit instance properties
+      print("DUPA:", name, baseClass.getProperty("name").getString(), baseClass.getPrototype().getObject().getPropertyNames())
+//      prototype.setPrototype(baseClass.getPrototype())
+      // Inherit static properties
+//      klassObject.setPrototype(baseClass.asValue())
+    }
+
+    // Return the constructor function
+    return klassValue.getFunction()
+  }
 
   /**
    Creates a synchronous host function that runs the given closure when it's called.
@@ -126,79 +185,52 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    - Returns: A JavaScript function represented as a `JavaScriptFunction`.
    */
   public func createSyncFunction(_ name: String, _ fn: @escaping SyncFunctionClosure) -> JavaScriptFunction {
-    class HostFunctionContext {
-      let runtime: JavaScriptRuntime
-      let call: SyncFunctionClosure
-
-      init(runtime: JavaScriptRuntime, _ function: @escaping SyncFunctionClosure) {
-        self.runtime = runtime
-        self.call = function
-      }
-    }
-
-    let context = Unmanaged.passRetained(HostFunctionContext(runtime: self, fn)).toOpaque()
-
-    func call(context: UnsafeMutableRawPointer, thisPtr: UnsafePointer<facebook.jsi.Value>, argumentsPtr: UnsafePointer<facebook.jsi.Value>, argumentsCount: Int) -> facebook.jsi.Value {
-      let context = Unmanaged<HostFunctionContext>.fromOpaque(context).takeUnretainedValue()
-      let this = UnsafeMutablePointer(mutating: thisPtr).move()
-      let arguments = JSValuesBuffer(context.runtime, start: argumentsPtr, count: argumentsCount)
-
-      do {
-        let result = try context.call(JavaScriptValue(context.runtime, this), arguments)
-        return result.pointee
-      } catch {
-        // TODO: Implement throwing `facebook.jsi.JSError`, returns `undefined` until then
-        return .undefined()
-      }
-    }
-
-    func deallocate(context: UnsafeMutableRawPointer) {
-      Unmanaged<HostFunctionContext>.fromOpaque(context).release()
-    }
-
-    let closure = expo.HostFunctionClosure(context, call, deallocate)
+    let closure = createFunctionClosure(runtime: self, fn)
     let hostFunction = expo.createHostFunction(pointee, name.cString(using: .utf8), closure)
 
     return JavaScriptFunction(self, hostFunction)
   }
 
   /**
-   Closure that modules use to resolve the JavaScript promise waiting for a result.
-   */
-  public typealias PromiseResolveClosure = @Sendable (_ result: borrowing JavaScriptValue) -> Void
-
-  /**
-   Closure that modules use to reject the JavaScript promise waiting for a result.
-   The error may be nil but it is preferable to pass an `NSError` object for more precise error messages.
-   */
-  public typealias PromiseRejectClosure = @Sendable (_ code: String, _ message: String, _ error: (any Error)?) -> Void
-
-  /**
    Type of the closure that is passed to the `createAsyncFunction` function.
+   It is invoked from asynchronous context, so it can await and call other asynchronous functions.
    */
-  public typealias AsyncFunctionClosure = @Sendable (
+  public typealias AsyncFunctionClosure = @JavaScriptActor (
     _ this: consuming JavaScriptValue,
     _ arguments: consuming JSValuesBuffer,
-    _ resolve: @escaping PromiseResolveClosure,
-    _ reject: @escaping PromiseRejectClosure
-  ) throws -> JavaScriptValue
+  ) async throws -> JavaScriptValue
 
   /**
    Creates an asynchronous host function that runs given block when it's called.
-   The block receives a resolver that you should call when the asynchronous operation
-   succeeds and a rejecter to call whenever it fails.
-   \return A JavaScript function represented as a `JavaScriptObject`.
+   The value returned by the closure is returned to JS asynchronously.
+   - Returns: A JavaScript function represented as a `JavaScriptFunction` that returns a promise.
    */
-  public func createAsyncFunction(_ name: String, _ fn: AsyncFunctionClosure) -> JavaScriptFunction {
-    // TODO: Implement
+  public func createAsyncFunction(_ name: String, _ function: sending @escaping AsyncFunctionClosure) -> JavaScriptFunction {
     return createSyncFunction(name) { this, arguments in
-//      let promiseSetup = { (runtime: facebook.jsi.Runtime, promise: Any) in
-//        expo.callPromiseSetupWithBlock(runtime, callInvoker, promise) { (resolver, rejecter) in
-//          fn(this, arguments, resolver, rejecter)
-//        }
-//      }
-//      return facebook.react.createPromiseAsJSIValue(pointee, promiseSetup)
-      return .undefined()
+      let promise = JavaScriptPromise(self)
+
+      // Need to switch to reference semantics as Task escapes the closure (consumes on capture).
+      let thisRef = this.ref()
+      let argumentsRef = arguments.ref()
+
+      // Switch to asynchronous context as early as possible (immediately on OS >=26.0).
+      // TODO: Ensure that the task is executed on the same JS run loop.
+      self.execute(taskName: "[JS] Async function \(name)") {
+        // Invoke the asynchronous function and resolve/reject the promise.
+        do {
+          let result = try await function(thisRef.take(), argumentsRef.take()).ref()
+          self.execute {
+            promise.resolve(result.take() ?? .undefined())
+          }
+        } catch {
+          self.execute {
+            promise.reject(error)
+          }
+        }
+      }
+
+      // Always return a promise in async functions
+      return promise.asValue()
     }
   }
 
@@ -207,9 +239,54 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
   /**
    Schedules a closure to be executed with granted synchronized access to the runtime.
    */
-  public func schedule(priority: SchedulerPriority = .normal, @_implicitSelfCapture _ closure: @escaping () -> Void) {
+  public func schedule(priority: SchedulerPriority = .normal, @_implicitSelfCapture _ closure: @escaping @JavaScriptActor () -> sending Void) -> Void {
     let reactPriority = facebook.react.SchedulerPriority(rawValue: priority.rawValue) ?? .NormalPriority
-    scheduler.scheduleTask(reactPriority, closure)
+    scheduler.scheduleTask(reactPriority) {
+//       This produces a compiler warning, but it is actually ok as we are sure that React Native runs this on the JavaScript thread.
+//      closure()
+      JavaScriptActor.assumeIsolated(closure)
+    }
+  }
+
+  public func schedule(
+    priority: SchedulerPriority = .normal,
+    taskName: String? = "[JS] scheduled execution (\(#function))",
+    @_implicitSelfCapture _ closure: @escaping @JavaScriptActor () async throws -> Void
+  ) -> Void {
+    schedule(priority: priority) {
+      Task.immediate_polyfill(name: taskName) {
+        try await closure()
+      }
+    }
+  }
+
+  public func execute(@_implicitSelfCapture _ closure: @escaping @JavaScriptActor () -> Void) {
+    scheduler.scheduleTask(.ImmediatePriority) {
+      JavaScriptActor.assumeIsolated(closure)
+    }
+  }
+
+  public func execute<R: Sendable>(@_implicitSelfCapture _ closure: sending @escaping @JavaScriptActor () async throws -> R) async throws -> sending R {
+    return try await runtimeActor.execute(closure)
+  }
+
+  public func execute<R: Sendable>(
+    taskName: String? = "[JS]: async execution \(#function)",
+    @_implicitSelfCapture _ closure: sending @escaping @JavaScriptActor () async throws -> R
+  ) -> Void {
+    Task.immediate_polyfill(name: taskName) {
+      try await runtimeActor.execute(closure)
+    }
+  }
+
+  /**
+   Asserts whether we are on the JavaScript thread. Helpful for debugging threading issues.
+   */
+  public func assertThread(file: String? = #file, function: String? = #function, line: Int? = #line) {
+    precondition(
+      Thread.current.name == "com.facebook.react.runtime.JavaScript",
+      "Function '\(function)' is not run on the JavaScript thread (\(file):\(line))"
+    )
   }
 
   /**
@@ -230,9 +307,9 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    Evaluates given JavaScript source code.
    */
   @discardableResult
-  public func eval(_ source: String) throws -> JavaScriptValue {
+  public func eval(label: String? = nil, _ source: String) throws -> JavaScriptValue {
     let stringBuffer = expo.makeSharedStringBuffer(std.string(source))
-    return JavaScriptValue(self, pointee.evaluateJavaScript(stringBuffer, std.string("<<evaluated>>")))
+    return JavaScriptValue(self, pointee.evaluateJavaScript(stringBuffer, std.string(label ?? "<<evaluated>>")))
   }
 
   /**
@@ -240,21 +317,58 @@ open class JavaScriptRuntime: Equatable, @unchecked Sendable {
    */
   @available(*, deprecated, message: "Spread the array into arguments instead")
   @discardableResult
-  public func eval(_ lines: [String]) throws -> JavaScriptValue {
-    try eval(lines.joined(separator: "\n"))
+  public func eval(label: String? = nil, _ lines: [String]) throws -> JavaScriptValue {
+    try eval(label: label, lines.joined(separator: "\n"))
   }
 
   /**
    Evaluates the given JavaScript source code made by joining arguments with a newline separator.
    */
   @discardableResult
-  public func eval(_ lines: String...) throws -> JavaScriptValue {
-    try eval(lines.joined(separator: "\n"))
+  public func eval(label: String? = nil, _ lines: String...) throws -> JavaScriptValue {
+    try eval(label: label, lines.joined(separator: "\n"))
   }
 
   // MARK: - Equatable
 
   public static func == (lhs: JavaScriptRuntime, rhs: JavaScriptRuntime) -> Bool {
     return lhs === rhs
+  }
+}
+
+private func createFunctionClosure(runtime: JavaScriptRuntime, _ closure: @escaping JavaScriptRuntime.SyncFunctionClosure) -> expo.HostFunctionClosure {
+  let context = Unmanaged.passRetained(HostFunctionContext(runtime: runtime, closure)).toOpaque()
+
+  func call(context: UnsafeMutableRawPointer, thisPtr: UnsafePointer<facebook.jsi.Value>, argumentsPtr: UnsafePointer<facebook.jsi.Value>, argumentsCount: Int) -> facebook.jsi.Value {
+    let context = Unmanaged<HostFunctionContext>.fromOpaque(context).takeUnretainedValue()
+    let this = UnsafeMutablePointer(mutating: thisPtr).move()
+    let argumentsRef = JSValuesBuffer(context.runtime, start: argumentsPtr, count: argumentsCount).ref()
+
+    return JavaScriptActor.assumeIsolated {
+      do {
+        let value = JavaScriptValue(context.runtime, this)
+        let result = try context.call(value, argumentsRef.take())
+        return result.pointee
+      } catch {
+        // TODO: Implement throwing `facebook.jsi.JSError`, returns `undefined` until then
+        return .undefined()
+      }
+    }
+  }
+
+  func deallocate(context: UnsafeMutableRawPointer) {
+    Unmanaged<HostFunctionContext>.fromOpaque(context).release()
+  }
+
+  return expo.HostFunctionClosure(context, call, deallocate)
+}
+
+internal final class HostFunctionContext: Sendable {
+  let runtime: JavaScriptRuntime
+  let call: JavaScriptRuntime.SyncFunctionClosure
+
+  init(runtime: JavaScriptRuntime, _ function: @escaping JavaScriptRuntime.SyncFunctionClosure) {
+    self.runtime = runtime
+    self.call = function
   }
 }

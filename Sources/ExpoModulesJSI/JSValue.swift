@@ -3,7 +3,7 @@
 internal import jsi
 internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptValue: Sendable, ~Copyable {
+public struct JavaScriptValue: JavaScriptType, Escapable, ~Copyable {
   internal weak var runtime: JavaScriptRuntime?
   internal let pointee: facebook.jsi.Value
 
@@ -67,10 +67,22 @@ public struct JavaScriptValue: Sendable, ~Copyable {
    Copies the value.
    */
   public func copy() -> JavaScriptValue {
-    guard let runtime else {
+    if let runtime {
+      return JavaScriptValue(runtime, facebook.jsi.Value(runtime.pointee, pointee))
+    }
+    // Some simple value kinds do not require the runtime.
+    switch kind {
+    case .undefined:
+      return .undefined()
+    case .null:
+      return .null()
+    case .bool:
+      return .init(nil, facebook.jsi.Value(getBool()))
+    case .number:
+      return .init(nil, facebook.jsi.Value(getDouble()))
+    default:
       JS.runtimeLostFatalError()
     }
-    return JavaScriptValue(runtime, facebook.jsi.Value(runtime.pointee, pointee))
   }
 
   public func isUndefined() -> Bool {
@@ -122,6 +134,45 @@ public struct JavaScriptValue: Sendable, ~Copyable {
     return pointee.isObject() && expo.isTypedArray(jsiRuntime, pointee.getObject(jsiRuntime))
   }
 
+  public func getAny() -> Any {
+    if isUndefined() || isNull() {
+      return Any?.none as Any
+    }
+    if isBool() {
+      return getBool()
+    }
+    if isNumber() {
+      return getDouble()
+    }
+    if isString() {
+      return getString()
+    }
+    if let object = isObject() ? getObject() : nil {
+      if let array = object.isArray() ? object.getArray() : nil {
+        let size = array.size
+        var result = [Any]()
+
+        result.reserveCapacity(size)
+
+        for index in 0..<size {
+          result.append(array.getValue(atIndex: index).getAny())
+        }
+        return result
+      }
+      if object.isFunction() {
+        fatalError("Unimplemented")
+      }
+      var result = [String: Any]()
+
+      for propertyName in object.getPropertyNames() {
+        let property = object.getProperty(propertyName)
+        result[propertyName] = property.getAny()
+      }
+      return result
+    }
+    fatalError("Unsupported value kind: \(kind)")
+  }
+
   public func getBool() -> Bool {
     return pointee.getBool()
   }
@@ -138,7 +189,7 @@ public struct JavaScriptValue: Sendable, ~Copyable {
     guard let jsiRuntime = runtime?.pointee else {
       JS.runtimeLostFatalError()
     }
-    return String(pointee.getString(jsiRuntime).utf8(jsiRuntime))
+    return String(pointee.getString(jsiRuntime).utf16(jsiRuntime))
   }
 
   public func getObject() -> JavaScriptObject {
@@ -163,6 +214,38 @@ public struct JavaScriptValue: Sendable, ~Copyable {
       return nil
     }
     return JavaScriptTypedArray(runtime, expo.TypedArray(runtime.pointee, pointee.getObject(runtime.pointee)))
+  }
+
+  /**
+   Returns a string representing the value. Same as calling `toString()` in JS.
+   */
+  public func toString() -> String {
+    guard let jsiRuntime = runtime?.pointee else {
+      JS.runtimeLostFatalError()
+    }
+    return String(pointee.toString(jsiRuntime).utf16(jsiRuntime))
+  }
+
+  /**
+   Same as calling `JSON.stringify` with this value, given replacer and space.
+   */
+  public func jsonStringify(replacer: consuming JavaScriptValue? = nil, space: consuming JavaScriptValue? = nil) throws -> String? {
+    guard let runtime else {
+      JS.runtimeLostFatalError()
+    }
+    let value = try runtime
+      .global()
+      .getPropertyAsObject("JSON")
+      .getPropertyAsFunction("stringify")
+      .call(arguments: copy().ref(), replacer?.ref(), space?.ref())
+    return value.isString() ? value.getString() : nil
+  }
+
+  // MARK: - JavaScriptType
+
+  public func asValue() -> JavaScriptValue {
+    // We need to copy the value as `self` would be borrowed
+    return copy()
   }
 
   // MARK: - Kind

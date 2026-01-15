@@ -3,7 +3,7 @@
 internal import jsi
 internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptObject: Sendable, ~Copyable {
+public struct JavaScriptObject: JavaScriptType, Sendable, ~Copyable {
   internal let runtime: JavaScriptRuntime
   internal var pointee: facebook.jsi.Object
 
@@ -19,7 +19,7 @@ public struct JavaScriptObject: Sendable, ~Copyable {
    */
   public init<DictValue: JSRepresentable>(_ runtime: JavaScriptRuntime, _ dictionary: [String: DictValue]) {
     self.runtime = runtime
-    self.pointee = dictionary.toJSIValue(in: runtime.pointee).getObject(runtime.pointee)
+    self.pointee = dictionary.toJSValue(in: runtime).getObject().pointee
   }
 
 //  public init(_ runtime: JavaScriptRuntime, _ object: UnsafeRawPointer) {
@@ -33,6 +33,27 @@ public struct JavaScriptObject: Sendable, ~Copyable {
   internal/*!*/ init(_ runtime: JavaScriptRuntime, _ object: consuming facebook.jsi.Object) {
     self.runtime = runtime
     self.pointee = object
+  }
+
+  public func isArray() -> Bool {
+    return pointee.isArray(runtime.pointee)
+  }
+
+  public func isFunction() -> Bool {
+    return pointee.isFunction(runtime.pointee)
+  }
+
+// TODO: `isHostObject` is ambiguous for Swift as it's a template – we need specialization in C++
+//  public func isHostObject() -> Bool {
+//    return pointee.isHostObject(runtime.pointee)
+//  }
+
+  public func isArrayBuffer() -> Bool {
+    return pointee.isArrayBuffer(runtime.pointee)
+  }
+
+  public func getArray() -> JavaScriptArray {
+    return JavaScriptArray(runtime: runtime, pointee: pointee.getArray(runtime.pointee))
   }
 
   // MARK: - Accessing object properties
@@ -55,6 +76,22 @@ public struct JavaScriptObject: Sendable, ~Copyable {
     }
   }
 
+  public func getPropertyAsObject(_ name: String) -> JavaScriptObject {
+    return JavaScriptObject(runtime, pointee.getPropertyAsObject(runtime.pointee, name))
+  }
+
+  public func getPropertyAsFunction(_ name: String) -> JavaScriptFunction {
+    return JavaScriptFunction(runtime, pointee.getPropertyAsFunction(runtime.pointee, name))
+  }
+
+  public func getPrototype() -> JavaScriptValue {
+    return JavaScriptValue(runtime, pointee.getPrototype(runtime.pointee))
+  }
+
+  public func setPrototype(_ prototype: consuming JavaScriptValue) {
+    pointee.setPrototype(runtime.pointee, prototype.pointee)
+  }
+
   // MARK: - Modifying object properties
 
   public func setProperty(_ name: String, _ bool: Bool) {
@@ -65,17 +102,17 @@ public struct JavaScriptObject: Sendable, ~Copyable {
     expo.setProperty(runtime.pointee, pointee, name, double)
   }
 
-  public func setProperty(_ name: String, value: consuming JavaScriptValue?) {
-    let value = value ?? .null()
+  public func setProperty(_ name: String, value: consuming JavaScriptValue) {
+    // This specialization is to avoid copying the value; `asValue()` on `JavaScriptValue` needs to do a copy.
     expo.setProperty(runtime.pointee, pointee, name, value.pointee)
   }
 
-  public func setProperty<Value: JSRepresentable>(_ name: String, value: consuming Value) {
+  public func setProperty<T: JSRepresentable & ~Copyable>(_ name: String, value: consuming T) {
     let jsiValue = value.toJSValue(in: runtime).pointee
     expo.setProperty(runtime.pointee, pointee, name, jsiValue)
   }
 
-  internal func setProperty<Value: JSRepresentable>(_ name: String, value: consuming Value) where Value: JSIRepresentable {
+  internal func setProperty<T: JSRepresentable>(_ name: String, value: consuming T) where T: JSIRepresentable {
     let jsiValue = value.toJSIValue(in: runtime.pointee)
     expo.setProperty(runtime.pointee, pointee, name, jsiValue)
   }
@@ -97,9 +134,9 @@ public struct JavaScriptObject: Sendable, ~Copyable {
     defineProperty(name, descriptor: descriptorObject)
   }
 
-  public func defineProperty<Value: JSRepresentable & ~Copyable>(_ name: String, value: borrowing Value, options: PropertyOptions = []) {
+  public func defineProperty<T: JSRepresentable & ~Copyable>(_ name: String, value: borrowing T, options: PropertyOptions = []) {
     let descriptor = PropertyDescriptor(
-      configurable: options.contains(.writable),
+      configurable: options.contains(.configurable),
       enumerable: options.contains(.enumerable),
       writable: options.contains(.writable),
       value: value.toJSValue(in: runtime)
@@ -109,7 +146,7 @@ public struct JavaScriptObject: Sendable, ~Copyable {
 
   // MARK: - Conversions
 
-  public func toValue() -> JavaScriptValue {
+  public func asValue() -> JavaScriptValue {
     return JavaScriptValue(runtime, facebook.jsi.Value(runtime.pointee, pointee))
   }
 
@@ -128,7 +165,6 @@ public struct JavaScriptObject: Sendable, ~Copyable {
   public func setExternalMemoryPressure(_ size: Int) {
     pointee.setExternalMemoryPressure(runtime.pointee, size)
   }
-
 }
 
 extension JavaScriptObject: JSRepresentable {
@@ -137,17 +173,17 @@ extension JavaScriptObject: JSRepresentable {
   }
 
   public func toJSValue(in runtime: JavaScriptRuntime) -> JavaScriptValue {
-    return toValue()
+    return asValue()
   }
 }
 
 extension JavaScriptObject: JSIRepresentable {
-  internal/*!*/ static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptObject {
+  internal static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptObject {
     fatalError("Unimplemented")
   }
 
-  internal/*!*/ func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
-    return toValue().pointee
+  internal func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
+    return asValue().pointee
   }
 }
 

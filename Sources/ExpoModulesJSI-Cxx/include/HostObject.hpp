@@ -19,7 +19,6 @@ public:
 
   virtual ~HostObject() {
     _callbacks->dealloc();
-    delete _callbacks;
   }
 
   inline jsi::Value get(jsi::Runtime &runtime, const jsi::PropNameID &name) override {
@@ -30,16 +29,8 @@ public:
     _callbacks->set(name.utf8(runtime).c_str(), value);
   }
 
-  /* inline */ std::vector<jsi::PropNameID> getPropertyNames(jsi::Runtime &runtime) override {
-    //  std::vector<const char *> propertyNames = _callbacks->_getPropertyNames();
-    std::vector<jsi::PropNameID> propertyNamesIds;
-
-    //  propertyNamesIds.reserve(propertyNames.capacity());
-
-    //  for (auto &name : propertyNames) {
-    //    propertyNamesIds.push_back(jsi::PropNameID::forUtf8(runtime, name));
-    //  }
-    return propertyNamesIds;
+  inline std::vector<jsi::PropNameID> getPropertyNames(jsi::Runtime &runtime) override {
+    return _callbacks->getPropertyNames();
   }
 
   inline static jsi::Object makeObject(jsi::Runtime &runtime, HostObjectCallbacks *callbacks) {

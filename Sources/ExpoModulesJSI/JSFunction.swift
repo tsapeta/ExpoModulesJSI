@@ -3,7 +3,7 @@
 internal import jsi
 internal import ExpoModulesJSI_Cxx
 
-public struct JavaScriptFunction: ~Copyable {
+public struct JavaScriptFunction: JavaScriptType, ~Copyable {
   internal weak var runtime: JavaScriptRuntime?
   internal let pointee: facebook.jsi.Function
 
@@ -14,57 +14,66 @@ public struct JavaScriptFunction: ~Copyable {
 
   // MARK: - Calling
 
-  // TODO: Temporary specialized function, remove it
-  public func call(arguments: Double...) -> JavaScriptValue {
-    guard let jsiRuntime = runtime?.pointee else {
+  /**
+   Calls the function with the given `this` object and arguments.
+   */
+  @discardableResult
+  public func call(this: consuming JavaScriptObject? = nil, arguments: consuming JSValuesBuffer? = nil) throws -> JavaScriptValue {
+    guard let runtime else {
       JS.runtimeLostFatalError()
     }
-    let bufferPointer = UnsafeMutableBufferPointer<facebook.jsi.Value>.allocate(capacity: arguments.count)
-
-    for (index, argument) in arguments.enumerated() {
-      bufferPointer.initializeElement(at: index, to: facebook.jsi.Value(argument))
+    let jsiResult = if let this {
+      pointee.callWithThis(runtime.pointee, this.pointee, arguments?.baseAddress, arguments?.count ?? 0)
+    } else {
+      pointee.call(runtime.pointee, arguments?.baseAddress, arguments?.count ?? 0)
     }
-
-    let result = pointee.call(jsiRuntime, bufferPointer.baseAddress, bufferPointer.count)
-    return JavaScriptValue(runtime, result)
+    return JavaScriptValue(runtime, jsiResult)
   }
 
   /**
    Calls the function with the given `this` object and arguments.
    */
-  public func call(this: consuming JavaScriptObject?, arguments: consuming JSValuesBuffer) throws -> JavaScriptValue {
+  @discardableResult
+  public func call<each T: JSRepresentable>(this: consuming JavaScriptObject? = nil, arguments: repeat each T) throws -> JavaScriptValue {
     guard let runtime else {
       JS.runtimeLostFatalError()
     }
-    let jsiResult = if let this {
-      pointee.callWithThis(runtime.pointee, this.pointee, arguments.baseAddress, arguments.count)
-    } else {
-      pointee.call(runtime.pointee, arguments.baseAddress, arguments.count)
+    let argumentsBuffer = JSValuesBuffer.allocate(in: runtime, with: repeat each arguments)
+    return try self.call(this: this, arguments: argumentsBuffer)
+  }
+
+  /**
+   Calls the function as a constructor with the given buffer of arguments. It's like calling a function with the `new` keyword.
+   */
+  public func callAsConstructor(_ arguments: consuming JSValuesBuffer? = nil) throws -> JavaScriptValue {
+    guard let runtime else {
+      JS.runtimeLostFatalError()
     }
+    let jsiResult = pointee.callAsConstructor(runtime.pointee, arguments?.baseAddress, arguments?.count ?? 0)
     return JavaScriptValue(runtime, jsiResult)
   }
 
   /**
    Calls the function as a constructor with the given arguments. It's like calling a function with the `new` keyword.
    */
-  public func callAsConstructor(_ arguments: consuming JSValuesBuffer) throws -> JavaScriptValue {
+  public func callAsConstructor<each T: JSRepresentable>(_ arguments: repeat each T) throws -> JavaScriptValue {
     guard let runtime else {
       JS.runtimeLostFatalError()
     }
-    let jsiResult = pointee.callAsConstructor(runtime.pointee, arguments.baseAddress, arguments.count)
-    return JavaScriptValue(runtime, jsiResult)
+    let argumentsBuffer = JSValuesBuffer.allocate(in: runtime, with: repeat each arguments)
+    return try callAsConstructor(argumentsBuffer)
   }
 
   // MARK: - Conversions
 
-  public func toValue() -> JavaScriptValue {
+  public func asValue() -> JavaScriptValue {
     guard let jsiRuntime = runtime?.pointee else {
       JS.runtimeLostFatalError()
     }
     return JavaScriptValue(runtime, expo.valueFromFunction(jsiRuntime, pointee))
   }
 
-  public func toObject() -> JavaScriptObject {
+  public func asObject() -> JavaScriptObject {
     guard let runtime else {
       JS.runtimeLostFatalError()
     }
@@ -73,22 +82,22 @@ public struct JavaScriptFunction: ~Copyable {
   }
 }
 
-/* public */ extension JavaScriptFunction: JSRepresentable {
+extension JavaScriptFunction: JSRepresentable {
   public static func fromJSValue(_ value: borrowing JavaScriptValue) -> JavaScriptFunction {
     return value.getFunction()
   }
 
   public func toJSValue(in runtime: JavaScriptRuntime) -> JavaScriptValue {
-    return toValue()
+    return asValue()
   }
 }
 
-/* internal */ extension JavaScriptFunction: JSIRepresentable {
+extension JavaScriptFunction: JSIRepresentable {
   internal static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> JavaScriptFunction {
     fatalError("Unimplemented")
   }
 
   internal func toJSIValue(in runtime: facebook.jsi.Runtime) -> facebook.jsi.Value {
-    return toValue().pointee
+    return asValue().pointee
   }
 }

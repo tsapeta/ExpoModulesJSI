@@ -25,7 +25,7 @@ xcodebuild \
   -scheme "$PACKAGE_NAME" \
   -destination "generic/platform=iOS Simulator" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  -configuration Release \
+  -configuration Debug \
   BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
   SKIP_INSTALL=NO \
   DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
@@ -36,7 +36,7 @@ rm -rf $XCFRAMEWORK_PATH
 # Create .xcframework
 xcodebuild \
   -create-xcframework \
-  -framework "./$PRODUCTS_PATH/Release-iphonesimulator/PackageFrameworks/$PACKAGE_NAME.framework" \
+  -framework "./$PRODUCTS_PATH/Debug-iphonesimulator/PackageFrameworks/$PACKAGE_NAME.framework" \
   -output "$XCFRAMEWORK_PATH"
 
 #  -framework "./$PRODUCTS_PATH/Release-iphoneos/PackageFrameworks/$PACKAGE_NAME.framework"
@@ -55,10 +55,23 @@ for product_path in $PRODUCTS_PATH/*/; do
     mkdir -p $framework_modules_path
     cp -r $swiftmodule_src_path/ $swiftmodule_dest_path
 
+    # Make `Headers` directory and put Swift header and modulemap there
+    framework_headers_path="${framework_path}/Headers"
+    generated_module_maps_path="${DERIVED_DATA_PATH}/Build/Intermediates.noindex/GeneratedModuleMaps-iphonesimulator"
+    swift_header_path="${generated_module_maps_path}/${PACKAGE_NAME}-Swift.h"
+    module_map_path="${generated_module_maps_path}/${PACKAGE_NAME}.modulemap"
+
+    mkdir -p $framework_headers_path
+    cp $swift_header_path "$framework_headers_path/"
+    cp $module_map_path "$framework_headers_path/module.modulemap"
+
     # We don't need this dir
     rm -rf "${swiftmodule_dest_path}/Project"
   done
 done
 
-# Copy to my expo repo
-cp -r $XCFRAMEWORK_PATH ../expo/packages/expo-modules-core
+# Copy to my expo repo and touch the file, otherwise Xcode may use cached version
+dest_xcframework_path="../expo/packages/expo-modules-core/$PACKAGE_NAME.xcframework"
+cp -r $XCFRAMEWORK_PATH $(dirname $dest_xcframework_path)
+echo "xcframework successfully copied to: $dest_xcframework_path"
+#touch ../expo/$XCFRAMEWORK_PATH

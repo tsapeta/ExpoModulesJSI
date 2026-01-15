@@ -136,8 +136,8 @@ extension Optional: JSIRepresentable where Wrapped: JSIRepresentable {
   }
 }
 
-extension Dictionary: JSRepresentable where Key == String {}
-extension Dictionary: JSIRepresentable where Key == String {
+extension Dictionary: JSRepresentable where Key == String, Value: JSRepresentable {}
+extension Dictionary: JSIRepresentable where Key == String, Value: JSIRepresentable {
   static func fromJSIValue(_ value: borrowing facebook.jsi.Value, in runtime: facebook.jsi.Runtime) -> Dictionary<Key, Value> {
     let object = value.getObject(runtime)
     let propertyNames = object.getPropertyNames(runtime)
@@ -148,8 +148,8 @@ extension Dictionary: JSIRepresentable where Key == String {
       let jsiKey = propertyNames.getValueAtIndex(runtime, index)
       let key = String.fromJSIValue(jsiKey, in: runtime)
       let jsiValue = object.getProperty(runtime, jsiKey)
-//      let value = Value.fromJSIValue(jsiValue, in: runtime)
-//      result[key] = value
+
+      result[key] = Value.fromJSIValue(jsiValue, in: runtime)
     }
     return result
   }
@@ -159,12 +159,7 @@ extension Dictionary: JSIRepresentable where Key == String {
 
     for (key, value) in self {
       let keyString = String(describing: key)
-
-      if let value = value as? JSIRepresentable {
-        expo.setProperty(runtime, object, keyString, value.toJSIValue(in: runtime))
-      } else {
-        expo.setProperty(runtime, object, keyString, .null())
-      }
+      expo.setProperty(runtime, object, keyString, value.toJSIValue(in: runtime))
     }
     return facebook.jsi.Value(runtime, object)
   }
